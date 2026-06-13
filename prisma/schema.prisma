@@ -1,0 +1,480 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ─── Enums ────────────────────────────────────────────────────────────────────
+
+enum UserRole {
+  ADMIN
+  REVIEWER
+  AGENT
+}
+
+enum KnowledgeStatus {
+  PENDING
+  PROCESSING
+  REVIEW
+  APPROVED_INTERNAL
+  APPROVED_CLIENT_FACING
+  RESTRICTED
+  ARCHIVED
+}
+
+enum CampaignType {
+  PERSONA_SPOTLIGHT
+  URGENCY
+  REENGAGEMENT
+  REFERRAL_PUSH
+  SEASONAL
+  RETAIL_EDUCATION
+  RETAIL_PAHS
+  RETAIL_COMMUNITY
+}
+
+enum CampaignStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  COMPLETED
+  ARCHIVED
+}
+
+enum Persona {
+  LICENSED_AGENT
+  ASPIRING_AGENT
+  CAREER_CHANGER
+  REFERRAL_PARTNER
+  ENTREPRENEUR
+}
+
+enum Platform {
+  INSTAGRAM
+  TIKTOK
+  FACEBOOK
+  LINKEDIN
+  YOUTUBE
+  EMAIL
+  SMS
+}
+
+enum FunnelStage {
+  AWARENESS
+  INTEREST
+  CONSIDERATION
+  JOIN
+  ACTIVATE
+  REFER
+}
+
+enum DraftStatus {
+  DRAFT
+  REVIEW
+  APPROVED
+  PUBLISHED
+  ARCHIVED
+}
+
+enum OutputType {
+  SOCIAL_POST
+  EMAIL
+  SMS
+  ARTICLE
+  REPORT
+  SCRIPT
+  FOLLOW_UP
+  GRANT_DOCUMENT
+}
+
+enum InteractionType {
+  CALL
+  EMAIL
+  SMS
+  DM
+  MEETING
+  NOTE
+  FORM_SUBMIT
+  CLICK
+}
+
+enum TaskStatus {
+  OPEN
+  IN_PROGRESS
+  DONE
+  CANCELLED
+}
+
+// ─── Auth ─────────────────────────────────────────────────────────────────────
+
+model User {
+  id             String          @id @default(cuid())
+  email          String          @unique
+  name           String?
+  role           UserRole        @default(AGENT)
+  passwordHash   String?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  sessions       Session[]
+  auditEvents    AuditEvent[]
+  composerDrafts ComposerDraft[]
+  reviewedAssets KnowledgeAsset[] @relation("ReviewedBy")
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ─── Knowledge / Importer ─────────────────────────────────────────────────────
+
+model KnowledgeAsset {
+  id             String          @id @default(cuid())
+  title          String
+  sourceFileName String
+  sourceUrl      String?
+  mimeType       String
+  storagePath    String
+  extractedText  String?         @db.Text
+  category       String?
+  tags           String[]
+  status         KnowledgeStatus @default(PENDING)
+  internalUse    Boolean         @default(false)
+  clientFacing   Boolean         @default(false)
+  reviewedById   String?
+  reviewedAt     DateTime?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  reviewedBy     User?           @relation("ReviewedBy", fields: [reviewedById], references: [id])
+  citations      Citation[]
+  composerDrafts ComposerDraftKnowledge[]
+}
+
+model Citation {
+  id             String                  @id @default(cuid())
+  assetId        String
+  sourceLabel    String
+  sourceUrl      String
+  excerpt        String?                 @db.Text
+  createdAt      DateTime                @default(now())
+  asset          KnowledgeAsset          @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  draftCitations ComposerDraftCitation[]
+}
+
+// ─── Campaigns / UTM ──────────────────────────────────────────────────────────
+
+model Campaign {
+  id             String          @id @default(cuid())
+  name           String
+  type           CampaignType
+  persona        Persona?
+  status         CampaignStatus  @default(DRAFT)
+  durationDays   Int
+  targetEvent    String?
+  startDate      DateTime?
+  endDate        DateTime?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  utmTemplates   UTMTemplate[]
+  trackingLinks  TrackingLink[]
+  leads          Lead[]
+  composerDrafts ComposerDraft[]
+  rollups        EngagementRollup[]
+}
+
+model UTMTemplate {
+  id          String         @id @default(cuid())
+  campaignId  String
+  source      String
+  medium      String
+  campaign    String
+  content     String?
+  term        String?
+  createdAt   DateTime       @default(now())
+  campaignRef Campaign       @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  links       TrackingLink[]
+}
+
+model TrackingLink {
+  id            String                @id @default(cuid())
+  campaignId    String
+  utmTemplateId String?
+  slug          String                @unique
+  destination   String
+  utmSource     String
+  utmMedium     String
+  utmCampaign   String
+  utmContent    String?
+  utmTerm       String?
+  active        Boolean               @default(true)
+  createdAt     DateTime              @default(now())
+  campaign      Campaign              @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  utmTemplate   UTMTemplate?          @relation(fields: [utmTemplateId], references: [id])
+  clicks        TrackingClick[]
+  composerLinks ComposerDraftLink[]
+}
+
+model TrackingClick {
+  id        String       @id @default(cuid())
+  linkId    String
+  ip        String?
+  userAgent String?
+  referer   String?
+  leadId    String?
+  clickedAt DateTime     @default(now())
+  link      TrackingLink @relation(fields: [linkId], references: [id], onDelete: Cascade)
+  lead      Lead?        @relation(fields: [leadId], references: [id])
+}
+
+// ─── CRM ──────────────────────────────────────────────────────────────────────
+
+model LeadStage {
+  id       String @id @default(cuid())
+  name     String @unique
+  position Int
+  color    String @default("#c49a6c")
+  leads    Lead[]
+}
+
+model LeadScoringRule {
+  id          String  @id @default(cuid())
+  field       String
+  operator    String
+  value       String
+  points      Int
+  description String?
+  active      Boolean @default(true)
+}
+
+model Contact {
+  id         String   @id @default(cuid())
+  firstName  String
+  lastName   String
+  email      String?
+  phone      String?
+  state      String?
+  externalId String?
+  source     String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  leads      Lead[]
+}
+
+model Lead {
+  id             String          @id @default(cuid())
+  contactId      String
+  stageId        String?
+  persona        Persona?
+  score          Int             @default(0)
+  utmSource      String?
+  utmMedium      String?
+  utmCampaign    String?
+  utmContent     String?
+  utmTerm        String?
+  campaignId     String?
+  heardFrom      String?
+  notes          String?         @db.Text
+  aiSummary      String?         @db.Text
+  aiNextAction   String?         @db.Text
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  contact        Contact         @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  stage          LeadStage?      @relation(fields: [stageId], references: [id])
+  campaign       Campaign?       @relation(fields: [campaignId], references: [id])
+  interactions   Interaction[]
+  tasks          Task[]
+  trackingClicks TrackingClick[]
+  playbooks      SalesPlaybook[]
+}
+
+model Interaction {
+  id         String          @id @default(cuid())
+  leadId     String
+  type       InteractionType
+  channel    String?
+  body       String?         @db.Text
+  direction  String?
+  occurredAt DateTime        @default(now())
+  createdAt  DateTime        @default(now())
+  lead       Lead            @relation(fields: [leadId], references: [id], onDelete: Cascade)
+}
+
+model Task {
+  id        String     @id @default(cuid())
+  leadId    String
+  title     String
+  dueAt     DateTime?
+  status    TaskStatus @default(OPEN)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  lead      Lead       @relation(fields: [leadId], references: [id], onDelete: Cascade)
+}
+
+model SalesPlaybook {
+  id          String   @id @default(cuid())
+  leadId      String
+  content     String   @db.Text
+  aiGenerated Boolean  @default(false)
+  approved    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  lead        Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+}
+
+// ─── Composer ─────────────────────────────────────────────────────────────────
+
+model ComposerDraft {
+  id                String                   @id @default(cuid())
+  authorId          String
+  title             String
+  outputType        OutputType
+  persona           Persona?
+  platform          Platform?
+  funnelStage       FunnelStage?
+  campaignId        String?
+  body              String                   @db.Text
+  status            DraftStatus              @default(DRAFT)
+  utmRequired       Boolean                  @default(true)
+  citationRequired  Boolean                  @default(true)
+  complianceChecked Boolean                  @default(false)
+  complianceNote    String?
+  approvedAt        DateTime?
+  approvedBy        String?
+  publishedAt       DateTime?
+  createdAt         DateTime                 @default(now())
+  updatedAt         DateTime                 @updatedAt
+  author            User                     @relation(fields: [authorId], references: [id])
+  campaign          Campaign?                @relation(fields: [campaignId], references: [id])
+  revisions         ComposerRevision[]
+  knowledgeSources  ComposerDraftKnowledge[]
+  citations         ComposerDraftCitation[]
+  trackingLinks     ComposerDraftLink[]
+}
+
+model ComposerRevision {
+  id        String        @id @default(cuid())
+  draftId   String
+  body      String        @db.Text
+  note      String?
+  createdAt DateTime      @default(now())
+  draft     ComposerDraft @relation(fields: [draftId], references: [id], onDelete: Cascade)
+}
+
+model ComposerDraftKnowledge {
+  draftId   String
+  assetId   String
+  draft     ComposerDraft  @relation(fields: [draftId], references: [id], onDelete: Cascade)
+  asset     KnowledgeAsset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  @@id([draftId, assetId])
+}
+
+model ComposerDraftCitation {
+  draftId    String
+  citationId String
+  draft      ComposerDraft @relation(fields: [draftId], references: [id], onDelete: Cascade)
+  citation   Citation      @relation(fields: [citationId], references: [id], onDelete: Cascade)
+  @@id([draftId, citationId])
+}
+
+model ComposerDraftLink {
+  draftId        String
+  trackingLinkId String
+  draft          ComposerDraft @relation(fields: [draftId], references: [id], onDelete: Cascade)
+  trackingLink   TrackingLink  @relation(fields: [trackingLinkId], references: [id], onDelete: Cascade)
+  @@id([draftId, trackingLinkId])
+}
+
+// ─── Integrations / Source Governance ────────────────────────────────────────
+
+model RawIngestionEvent {
+  id          String    @id @default(cuid())
+  provider    String
+  eventType   String
+  payload     Json
+  processedAt DateTime?
+  createdAt   DateTime  @default(now())
+}
+
+model ExternalObjectMap {
+  id           String   @id @default(cuid())
+  provider     String
+  externalId   String
+  internalType String
+  internalId   String
+  createdAt    DateTime @default(now())
+  @@unique([provider, externalId, internalType])
+}
+
+model SourceHealth {
+  id           String    @id @default(cuid())
+  provider     String    @unique
+  status       String
+  lastChecked  DateTime  @default(now())
+  errorMessage String?
+  tokenExpiry  DateTime?
+}
+
+// ─── Audit ────────────────────────────────────────────────────────────────────
+
+model AuditEvent {
+  id         String   @id @default(cuid())
+  userId     String?
+  action     String
+  entityType String?
+  entityId   String?
+  metadata   Json?
+  ip         String?
+  createdAt  DateTime @default(now())
+  user       User?    @relation(fields: [userId], references: [id])
+}
+
+// ─── AI Workflows ─────────────────────────────────────────────────────────────
+
+model PromptTemplate {
+  id          String       @id @default(cuid())
+  name        String       @unique
+  template    String       @db.Text
+  version     Int          @default(1)
+  active      Boolean      @default(true)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  aiWorkflows AIWorkflow[]
+}
+
+model AIWorkflow {
+  id               String          @id @default(cuid())
+  promptTemplateId String?
+  input            String          @db.Text
+  output           String?         @db.Text
+  model            String
+  tokensUsed       Int?
+  durationMs       Int?
+  success          Boolean         @default(true)
+  errorMessage     String?
+  entityType       String?
+  entityId         String?
+  createdAt        DateTime        @default(now())
+  promptTemplate   PromptTemplate? @relation(fields: [promptTemplateId], references: [id])
+}
+
+// ─── Analytics Rollups ────────────────────────────────────────────────────────
+
+model EngagementRollup {
+  id          String   @id @default(cuid())
+  date        DateTime @db.Date
+  platform    String
+  campaignId  String?
+  impressions Int      @default(0)
+  clicks      Int      @default(0)
+  conversions Int      @default(0)
+  createdAt   DateTime @default(now())
+  campaign    Campaign? @relation(fields: [campaignId], references: [id])
+  @@unique([date, platform, campaignId])
+}

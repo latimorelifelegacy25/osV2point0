@@ -14,7 +14,15 @@ const nav = [
   { href: '/admin/settings', label: 'Settings', icon: '⚙' },
 ];
 
-export function OSShell({ title, children }: { title: string; children: ReactNode }) {
+export function OSShell({
+  title,
+  children,
+  userName,
+}: {
+  title: string;
+  children: ReactNode;
+  userName?: string;
+}) {
   const path = usePathname();
 
   return (
@@ -27,11 +35,13 @@ export function OSShell({ title, children }: { title: string; children: ReactNod
           </p>
           <p className="mt-0.5 text-xs text-white/40">v2.0 — Recruiting</p>
         </div>
+
         <nav className="flex flex-col gap-0.5 p-3">
           {nav.map((item) => {
-            const active = item.href === '/admin'
-              ? path === '/admin'
-              : path.startsWith(item.href);
+            const active =
+              item.href === '/admin'
+                ? path === '/admin'
+                : path.startsWith(item.href);
             return (
               <Link
                 key={item.href}
@@ -48,9 +58,20 @@ export function OSShell({ title, children }: { title: string; children: ReactNod
             );
           })}
         </nav>
-        <div className="mt-auto border-t border-white/10 px-5 py-4">
-          <p className="text-[10px] text-white/30">os.latimorelifelegacy.com</p>
-          <p className="text-[10px] text-white/20">go.latimorelifelegacy.com/t/:slug</p>
+
+        <div className="mt-auto border-t border-white/10 p-3">
+          {userName && (
+            <p className="mb-2 truncate px-2 text-xs text-white/40">{userName}</p>
+          )}
+          <form action="/api/auth/logout" method="POST">
+            <button
+              type="submit"
+              className="w-full rounded-xl px-3 py-2 text-left text-sm text-white/40 hover:bg-white/5 hover:text-white"
+            >
+              ← Sign out
+            </button>
+          </form>
+          <p className="mt-2 px-2 text-[10px] text-white/20">os.latimorelifelegacy.com</p>
         </div>
       </aside>
 
